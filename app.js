@@ -1,90 +1,46 @@
-require('dontenv').config();
+require('dotenv').config();
 
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000
-const bcrypt = require('bcrypt');
-const jwt = process.env.JWT_SECRET;
-const saltRounds = 10;
+const jwt = require('jsonwebtoken');
+
+const jwtSecret = process.env.JWT_SECRET;
+
+const bookRoutes = require('./routes/books');
+const authRoutes = require('./routes/auth');
 
 app.use(express.json());
 
-async function hashPassword(password) {
-    const hashPassword = await bcrypt.hash(password, saltRounds);
-    return hashPassword;
-}
+
+const verifyToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader) {
+        const token = authHeader.split(' ')[1];
+
+    jwt.verify(token, jwtSecret, (err, decoded) => {
+        if (err) {
+            return res.status(403).json({ error: "Invalid or expired token."});
+        }
+
+        req.user = decoded;
+        next();
+    });
+
+    } else {
+        return res.status(401).json({ error: "No token provided."});
+    }
+};
+
+app.use('/auth', authRoutes);
+app.use('/books', verifyToken, bookRoutes);
 
 app.get('/', (req, res) => {
     res.send('Welcome');
 });
 
-app.post('/register', async (req, res) => {
-        const { username, password } = req.body;
-        const cleanUsername = username.trim().toLowerCase();
-        
-    try {
-        
-        if (!cleanUsername.trim() || !password) {
-            return res.status(400).json({ error: "Bad Request." });
-        }
-        
-        const sql = `SELECT EXISTS (SELECT 1 FROM users WHERE username = $1);`;
-        const result = await pool.query(sql, [cleanUsername]);
-        const usernameTaken = result.rows[0].exists;
-
-        if (usernameTaken) {
-            return res.status(409).json({ error: "Username already exists." }); 
-        }
-
-        const hashedPassword = await hashPassword(password);
-        const insertSql = `INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username;`;
-        const insertResult = await pool.query(insertSql, [cleanUsername, hashedPassword]);
-            
-        res.status(201).json({ message: "User registered.", user: insertResult.rows[0]});
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Internal server error" });
-    }    
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
 });
 
-
-app.listen(3000, () => {
-    console.log('Server is running on port 3000');
-});
-
-
-app.post('/login', async (req, res) => {
-        try {
-        const { id, username, password } = req.body;
-        const rawPassword = password;
-        const secretKey = process.env.JWT_SECRET; 
-
-        cleanUsername = username.trim().toLowerCase();
-
-        if (!cleanUsername.trim() || !password) {
-            return res.status(400).json({ error: "Bad Request." });
-        }
-
-        const sqlUser = `SELECT * FROM users WHERE username = $1 `;
-        const result = await pool.query(sqlUser, [cleanUsername]);
-        const userRow = result.rows[0];
-
-        if (!userRow) {
-            return res.status(401).json({ error: "Username  not found." }); 
-        }
-
-        const passMatch = await bcrypt.compare(rawPassword, userRow.password);
-        
-        if(!passMatch) {
-            return res.status(401).json({ error: "Invalid password." }); 
-        } else {
-            const token = jwt.sign( {userId: userRow.id }, secretKey, { expiresIn: '1h' });
-            res.status(201).json({ token: token, username: username });
-        }
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Internal server error" });
-    }
-});
