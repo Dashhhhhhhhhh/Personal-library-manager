@@ -1,6 +1,10 @@
+const express = require('express');
+const router = express.Router();
 
-
+const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt');
+const pool = require('../db');
+
 const saltRounds = 10;
 
 async function hashPassword(password) {
@@ -8,19 +12,26 @@ async function hashPassword(password) {
     return hashPassword;
 }
 
+router.post('/register', async (req, res) => {
+    const { username, password } = req.body;
 
-app.post('/register', async (req, res) => {
-        const { username, password } = req.body;
-        const cleanUsername = username.trim().toLowerCase();
-        
+    if (!username || !password) {
+        return res.status(400).json({ error: "Bad Request." });
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+
     try {
-        
         if (!cleanUsername.trim() || !password) {
             return res.status(400).json({ error: "Bad Request." });
         }
-        
+
+        console.log("Registering user:", cleanUsername);
+
         const sql = `SELECT EXISTS (SELECT 1 FROM users WHERE username = $1);`;
         const result = await pool.query(sql, [cleanUsername]);
+        console.log("Query result:", result.rows);
+
         const usernameTaken = result.rows[0].exists;
 
         if (usernameTaken) {
@@ -30,8 +41,8 @@ app.post('/register', async (req, res) => {
         const hashedPassword = await hashPassword(password);
         const insertSql = `INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username;`;
         const insertResult = await pool.query(insertSql, [cleanUsername, hashedPassword]);
-            
-        res.status(201).json({ message: "User registered.", user: insertResult.rows[0]});
+        
+        res.status(201).json({ message: "User registered.", user: insertResult.rows[0] });
 
     } catch (err) {
         console.error(err);
@@ -39,19 +50,13 @@ app.post('/register', async (req, res) => {
     }    
 });
 
-
-app.listen(3000, () => {
-    console.log('Server is running on port 3000');
-});
-
-
-app.post('/login', async (req, res) => {
+router.post('/login', async (req, res) => {
         try {
-        const { id, username, password } = req.body;
+        const { username, password } = req.body;
         const rawPassword = password;
-        const secretKey = process.env.JWT_SECRET; 
+        const secretKey = process.env.JWT_SECRET;
 
-        cleanUsername = username.trim().toLowerCase();
+        const cleanUsername = username?.trim().toLowerCase();
 
         if (!cleanUsername.trim() || !password) {
             return res.status(400).json({ error: "Bad Request." });
@@ -71,7 +76,7 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ error: "Invalid password." }); 
         } else {
             const token = jwt.sign( {userId: userRow.id }, secretKey, { expiresIn: '1h' });
-            res.status(201).json({ token: token, username: username });
+            res.status(200).json({ token: token, username: username });
         }
 
     } catch (err) {
@@ -79,3 +84,5 @@ app.post('/login', async (req, res) => {
         res.status(500).json({ error: "Internal server error" });
     }
 });
+
+module.exports = router;
